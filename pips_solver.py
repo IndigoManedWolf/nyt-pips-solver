@@ -1,18 +1,18 @@
-# Edit dominos to have pairs of pips on the dominos
-# Edit blank_board to be a list of rows in a rectangular format, with cells that can be filled being represented by a -1, and cells that are not fillable represented by any non-integer (such as "_")
-# Edit checks to have key-value pairs, with keys being the list of indices in the grid in flattened row-major order (e.g. for a 10 wide by 13 tall grid, the 3rd element in the 4th row is (4-1)*10 + (3-1) = 32), and the value being a function that takes a list and returns True if it matches the constraint given in the puzzle
-
-# Values below filled in for Pips #18 Hard
+# Usage: python pips_solver.py [date in YYYY-MM-DD format, default is today] [difficulty: "easy", "medium", or "hard", default is hard]
 
 from collections import Counter
 import math
+import sys
+import time
+import requests
+import datetime
 
-blank_board = tuple(tuple(-1 for i in range(4)) for j in range(5))
-dominos = [(1,4),(3,4),(5,3),(0,1),(5,1),(0,3),(0,5),(2,5),(4,0),(2,4)]
-checks = {(0,4,5,6,7):lambda x:sum(x)==24, (1,):lambda x:sum(x)>1, (2,):lambda x:sum(x)==0, (8,12,16):lambda x:sum(x)==4, (9,10):lambda x:x[0]==x[1], (13,14,15):lambda x:(x[0] == x[1]) and (x[1] == x[2]), (17,18):lambda x:x[0]==x[1]}
+blank_board = tuple()
+dominos = []
+checks = {}
 solutions = []
-board_w = len(blank_board[0])
-board_h = len(blank_board)
+board_w = 0
+board_h = 0
 
 def create_arrangement(state):
 	board = [[i for i in j] for j in blank_board]
@@ -29,11 +29,6 @@ def create_arrangement(state):
 		board[y][x] = 1
 		board[y+1 if pos%2 else y][x+1 if pos%2==0 else x] = 1
 	return True
-
-domino_counts = Counter([tuple(sorted(i)) for i in dominos])
-arrangements = sum([create_arrangement([int(i) for i in bin(2**len(dominos)+x)[3:]]) for x in range(2**len(dominos))])
-orders = math.factorial(len(dominos))/math.prod([math.factorial(j) for _, j in domino_counts.items()])
-print("There are", arrangements, "different ways to arrange dominos in this grid, giving a total of", int(arrangements*orders*(2**len([d for d in dominos if d[0] != d[1]]))), "possible attempted solutions.")
 
 def eval_state(state, dominos, checks, verbose=False):
 	board = [[i for i in j] for j in blank_board]
@@ -87,13 +82,47 @@ def create_board(state, dominos):
 		board[y+1 if pos%2 else y][x+1 if pos%2==0 else x] = dominos[dom][0 if pos>=2 else 1]
 	return "\n".join(str(x) for x in board)
 
-solve([])
 
-print(len(solutions), "solutions found.")
+if __name__ == "__main__":
+	difficulty = "hard"
+	potential_args = sys.argv[1:]
+	if "easy" in potential_args :
+		difficulty = "easy"
+	if "medium" in potential_args :
+		difficulty = "medium"
+	if len([i for i in potential_args if "-" in i]) > 0:
+		date = [i for i in potential_args if "-" in i][0]
+	else:
+		date = datetime.datetime.now().strftime("%Y-%m-%d")
+	if len(date) != 10 or date[4] != "-" or date[7] != "-" or not (date[0:4]+date[5:7]+date[8:10]).isdigit():
+		raise ValueError("Date must be in YYYY-MM-DD format!")
+	json_data = requests.get("https://www.nytimes.com/svc/pips/v1/"+date+".json").json()[difficulty]
+	
+	print("Solving the", difficulty, "Pips game for the date", date)
+	
+	board_w = max([p[1] for d in json_data["solution"] for p in d])+1
+	board_h = max([p[0] for d in json_data["solution"] for p in d])+1
+	
+	blank_board = tuple(tuple(-1 for i in range(board_w)) for j in range(board_h))
+	dominos = [tuple(i) for i in json_data["dominoes"]]
+	constrainer = {"sum": (lambda y: (lambda z:sum(z)==y)), "equals": lambda y:(lambda z:z.count(z[0]) == len(z)), "unequal": lambda y:(lambda z:len(set(z))==len(z)), "greater": (lambda y: (lambda z:sum(z)>y)), "less": (lambda y: (lambda z:sum(z)<y))}
+	checks = {tuple(i[0]*board_w+i[1] for i in r["indices"]):constrainer[r["type"]](r["target"] if "target" in r else 0) for r in json_data["regions"] if r["type"] != "empty"}
+	solutions = []
 
-with open("./output.txt", "w") as f:
-	f.write("Dominos: "+str(dominos)+"\n")
-	for n, solution in enumerate(solutions):
-		f.write("Solution "+str(n)+":"+str(solution)+"\n")
-		f.write(create_board(solution, dominos))
-		f.write("\n\n")
+	domino_counts = Counter([tuple(sorted(i)) for i in dominos])
+	arrangements = sum([create_arrangement([int(i) for i in bin(2**len(dominos)+x)[3:]]) for x in range(2**len(dominos))])
+	orders = math.factorial(len(dominos))/math.prod([math.factorial(j) for _, j in domino_counts.items()])
+	print("There are", arrangements, "different ways to arrange dominos in this grid, giving a total of", int(arrangements*orders*(2**len([d for d in dominos if d[0] != d[1]]))), "possible attempted solutions.")
+
+	start = time.time()
+	solve([])
+
+	print(len(solutions), "solutions found.")
+	print("Took", time.time()-start, "seconds to find all solutions.")
+
+	with open("./output.txt", "w") as f:
+		f.write("Dominos: "+str(dominos)+"\n")
+		for n, solution in enumerate(solutions):
+			f.write("Solution "+str(n)+":"+str(solution)+"\n")
+			f.write(create_board(solution, dominos))
+			f.write("\n\n")
