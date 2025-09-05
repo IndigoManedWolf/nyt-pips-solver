@@ -62,9 +62,15 @@ def solve(base_state):
 	if len(indices_remaining) == 0:
 		solutions.append(base_state)
 	for i in indices_remaining:
-		for p in [0,1,2,3]:
-			if eval_state(base_state+[(i,p)], dominos, checks):
-				solve(base_state+[(i,p)])
+		#if len(base_state) < 4: print("Working on starting with domino(s)", indices_used+[i])
+		if dominos[i][0] == dominos[i][1]:
+			for p in [0,1]:
+				if eval_state(base_state+[(i,p)], dominos, checks):
+					solve(base_state+[(i,p)])
+		else:
+			for p in [0,1,2,3]:
+				if eval_state(base_state+[(i,p)], dominos, checks):
+					solve(base_state+[(i,p)])
 
 def create_board(state, dominos):
 	board = [[i for i in j] for j in blank_board]
@@ -103,10 +109,14 @@ if __name__ == "__main__":
 	board_w = max([p[1] for d in json_data["solution"] for p in d])+1
 	board_h = max([p[0] for d in json_data["solution"] for p in d])+1
 	
-	blank_board = tuple(tuple(-1 for i in range(board_w)) for j in range(board_h))
+	blank_board = [["_" for i in range(board_w)] for j in range(board_h)]
 	dominos = [tuple(i) for i in json_data["dominoes"]]
 	constrainer = {"sum": (lambda y: (lambda z:sum(z)==y)), "equals": lambda y:(lambda z:z.count(z[0]) == len(z)), "unequal": lambda y:(lambda z:len(set(z))==len(z)), "greater": (lambda y: (lambda z:sum(z)>y)), "less": (lambda y: (lambda z:sum(z)<y))}
 	checks = {tuple(i[0]*board_w+i[1] for i in r["indices"]):constrainer[r["type"]](r["target"] if "target" in r else 0) for r in json_data["regions"] if r["type"] != "empty"}
+	for r in json_data["regions"]:
+		for i in r["indices"]:
+			blank_board[i[0]][i[1]] = -1
+	blank_board = tuple(tuple(i) for i in blank_board)
 	solutions = []
 
 	domino_counts = Counter([tuple(sorted(i)) for i in dominos])
