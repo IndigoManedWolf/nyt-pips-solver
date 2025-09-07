@@ -14,6 +14,8 @@ solutions = []
 board_w = 0
 board_h = 0
 
+count = 0
+
 def create_arrangement(state):
 	board = [[i for i in j] for j in blank_board]
 	for pos in state:
@@ -29,13 +31,25 @@ def create_arrangement(state):
 		board[y][x] = 1
 		board[y+1 if pos%2 else y][x+1 if pos%2==0 else x] = 1
 	return True
+	
+def build_tree(valid_sequences):
+	output = {}
+	if len(valid_sequences[0]) == 0:
+		return output
+	left = [i[1:] for i in valid_sequences if i[0] == 0]
+	if len(left) != 0:
+		output[0] = build_tree(left)
+	right = [i[1:] for i in valid_sequences if i[0] == 1]
+	if len(right) != 0:
+		output[1] = build_tree(right)
+	return output
 
 def eval_state(state, dominos, checks, verbose=False):
 	board = [[i for i in j] for j in blank_board]
 	for dom, pos in state:
-		temp = sum(board, start=[]).index(-1)
-		y = temp//board_w 
-		x = temp%board_w 
+		loc = sum(board, start=[]).index(-1)
+		y = loc//board_w 
+		x = loc%board_w 
 		if pos % 2 == 0:
 			if x+1 == board_w or board[y][x+1] != -1:
 				if verbose: print("Failed placing domino", dom, "at", x, ",", y)
@@ -46,17 +60,20 @@ def eval_state(state, dominos, checks, verbose=False):
 				return False
 		board[y][x] = dominos[dom][1 if pos>= 2 else 0]
 		board[y+1 if pos%2 else y][x+1 if pos%2==0 else x] = dominos[dom][0 if pos>=2 else 1]
+	loc2 = loc + (1 if pos%2==0 else board_w)
 	if verbose: print(board)
 	board = sum(board, start=[])
 	for indices, check in checks.items():
-		subboard = [board[i] for i in indices]
-		if -1 in subboard: continue
-		if not check(subboard):
-			if verbose: print("Failed check with indices", indices)
-			return False
+		if loc in indices or loc2 in indices:
+			subboard = [board[i] for i in indices]
+			if not check[-1 in subboard]([i for i in subboard if i!=-1]):
+				if verbose: print("Failed check with indices", indices)
+				return False
 	return True
 
+#Base solver
 def solve(base_state):
+	global count
 	indices_used = [i[0] for i in base_state]
 	indices_remaining = [i for i in range(len(dominos)) if i not in indices_used]
 	if len(indices_remaining) == 0:
@@ -65,12 +82,36 @@ def solve(base_state):
 		#if len(base_state) < 4: print("Working on starting with domino(s)", indices_used+[i])
 		if dominos[i][0] == dominos[i][1]:
 			for p in [0,1]:
+				count += 1
 				if eval_state(base_state+[(i,p)], dominos, checks):
 					solve(base_state+[(i,p)])
 		else:
 			for p in [0,1,2,3]:
+				count += 1
 				if eval_state(base_state+[(i,p)], dominos, checks):
 					solve(base_state+[(i,p)])
+
+#Solver that uses information on which arrangements are valid.
+def solve_tree(base_state, tree):
+	global count
+	indices_used = [i[0] for i in base_state]
+	indices_remaining = [i for i in range(len(dominos)) if i not in indices_used]
+	if len(indices_remaining) == 0:
+		solutions.append(base_state)
+	for i in indices_remaining:
+		#if len(base_state) < 4: print("Working on starting with domino(s)", indices_used+[i])
+		if dominos[i][0] == dominos[i][1]:
+			for p in tree.keys():
+				count += 1
+				if eval_state(base_state+[(i,p)], dominos, checks):
+					solve_tree(base_state+[(i,p)], tree[p])
+		else:
+			for o in tree.keys():
+				for l in (0,2):
+					p = o+l
+					count += 1
+					if eval_state(base_state+[(i,p)], dominos, checks):
+						solve_tree(base_state+[(i,p)], tree[o])
 
 def create_board(state, dominos):
 	board = [[i for i in j] for j in blank_board]
@@ -111,7 +152,17 @@ if __name__ == "__main__":
 	
 	blank_board = [["_" for i in range(board_w)] for j in range(board_h)]
 	dominos = [tuple(i) for i in json_data["dominoes"]]
-	constrainer = {"sum": (lambda y: (lambda z:sum(z)==y)), "equals": lambda y:(lambda z:z.count(z[0]) == len(z)), "unequal": lambda y:(lambda z:len(set(z))==len(z)), "greater": (lambda y: (lambda z:sum(z)>y)), "less": (lambda y: (lambda z:sum(z)<y))}
+	# First function each pair checks if it satisfies the condition, second checks if a partial list could potentially lead to the condition being satisfied. This lets more wrong solutions be discarded earlier.
+	constrainer = {"sum": lambda y: ((lambda z:sum(z)==y),
+									 (lambda z:sum(z)<=y)),
+				   "equals": lambda y: ((lambda z:z.count(z[0]) == len(z)),
+										(lambda z:z.count(z[0]) == len(z))),
+				   "unequal": lambda y: ((lambda z:len(set(z))==len(z)),
+										 (lambda z:len(set(z))==len(z))),
+				   "greater": lambda y: ((lambda z:sum(z)>y),
+										 (lambda z:True)),
+				   "less": lambda y: ((lambda z:sum(z)<y),
+									  (lambda z:sum(z)<y))}
 	checks = {tuple(i[0]*board_w+i[1] for i in r["indices"]):constrainer[r["type"]](r["target"] if "target" in r else 0) for r in json_data["regions"] if r["type"] != "empty"}
 	for r in json_data["regions"]:
 		for i in r["indices"]:
@@ -120,12 +171,17 @@ if __name__ == "__main__":
 	solutions = []
 
 	domino_counts = Counter([tuple(sorted(i)) for i in dominos])
-	arrangements = sum([create_arrangement([int(i) for i in bin(2**len(dominos)+x)[3:]]) for x in range(2**len(dominos))])
+	arrangements = [[int(i) for i in bin(2**len(dominos)+x)[3:]] for x in range(2**len(dominos)) if create_arrangement([int(i) for i in bin(2**len(dominos)+x)[3:]])]
+	tree = build_tree(arrangements)
 	orders = math.factorial(len(dominos))/math.prod([math.factorial(j) for _, j in domino_counts.items()])
-	print("There are", arrangements, "different ways to arrange dominos in this grid, giving a total of", int(arrangements*orders*(2**len([d for d in dominos if d[0] != d[1]]))), "possible attempted solutions.")
+	print("There are", len(arrangements), "different ways to arrange dominos in this grid, giving a total of", int(len(arrangements)*orders*(2**len([d for d in dominos if d[0] != d[1]]))), "possible attempted solutions.")
 
 	start = time.time()
-	solve([])
+
+	#Using the valid arrangements found in the previous step, a different function that tests partial solutions using only valid arrangements can be used instead.
+	#solve([])
+	solve_tree([], tree)
+	print(count, "partials used")
 
 	print(len(solutions), "solutions found.")
 	print("Took", time.time()-start, "seconds to find all solutions.")
