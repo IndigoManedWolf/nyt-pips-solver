@@ -26,7 +26,7 @@ def create_arrangement(state):
 			if x+1 == board_w or board[y][x+1] != -1:
 				return False
 		else:
-			if y+1 == board_h:
+			if y+1 == board_h or board[y+1][x] != -1:
 				return False
 		board[y][x] = 1
 		board[y+1 if pos%2 else y][x+1 if pos%2==0 else x] = 1
@@ -192,4 +192,5 @@ if __name__ == "__main__":
 			f.write("Solution "+str(n)+":"+str(solution)+"\n")
 			f.write(create_board(solution, dominos))
 			f.write("\n\n")
+
 
